@@ -1,36 +1,81 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Company Scout
 
-## Getting Started
+A Next.js web application that queries the **Companies House public API** to find recently incorporated UK companies and their directors, for sales outreach.
 
-First, run the development server:
+## Features
+
+- **Search** by incorporation date range (last 7 / 14 / 30 / 60 days), SIC codes, company type, and registered address keyword
+- **Results table** with company details and director names, occupations, nationalities
+- **Export** selected rows or all results to CSV (`companies_house_YYYY-MM-DD.csv`)
+- **Rate limiting**: configurable delay between officer lookups, exponential backoff on 429, live progress (“Fetching directors: X of Y companies”)
+- **Dark mode** and responsive layout
+
+## Tech Stack
+
+- Next.js 14 (App Router)
+- Kokonut UI / shadcn/ui, Tailwind CSS
+- axios, Server Actions (API key stays server-side)
+
+## Getting started
+
+### 1. Register for a Companies House API key
+
+The API is free to use. Get a key from:
+
+- **Developer hub**: [developer.company-information.service.gov.uk](https://developer.company-information.service.gov.uk)
+
+Sign in or register, then create an application and generate an API key. You’ll use this as Basic Auth (username = API key, password = empty).
+
+### 2. Environment variables
+
+Copy the example env file and add your key:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Edit `.env.local` and set:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```env
+COMPANIES_HOUSE_API_KEY=your-api-key-here
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Optional (defaults shown):
 
-## Learn More
+```env
+# Delay in ms between officer API calls (default 200). Helps stay under 600 req/5 min.
+OFFICER_FETCH_DELAY_MS=200
+```
 
-To learn more about Next.js, take a look at the following resources:
+**Never commit `.env.local`** — it’s in `.gitignore`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 3. Install and run
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm install
+npm run dev
+```
 
-## Deploy on Vercel
+Open [http://localhost:3000](http://localhost:3000).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Email and enrichment
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Email addresses are not available** from the Companies House API. After exporting your CSV, use enrichment tools for contact data, for example:
+
+- [Apollo.io](https://www.apollo.io/)
+- [Hunter.io](https://hunter.io/)
+- [LinkedIn Sales Navigator](https://business.linkedin.com/sales-solutions)
+
+## API reference
+
+- Base URL: `https://api.company-information.service.gov.uk`
+- Advanced company search and company officers are used; all requests are made server-side so the API key is never exposed to the client.
+
+## Project structure
+
+- `app/page.tsx` — Search UI and results
+- `app/actions.ts` — Server Actions for Companies House calls
+- `components/` — SearchFilters, ResultsTable, ExportButton, ProgressBar
+- `lib/companiesHouse.ts` — API client with rate limiting and backoff
+- `lib/csvExport.ts` — CSV generation
+- `types/index.ts` — TypeScript types for API and UI
