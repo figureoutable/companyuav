@@ -1,5 +1,11 @@
 import axios, { AxiosInstance, AxiosError } from "axios";
-import type { CHAdvancedSearchResponse, CHOfficersResponse } from "@/types";
+import type {
+  CHAddress,
+  CHAdvancedSearchResponse,
+  CHCompanySearchItem,
+  CHOfficerItem,
+  CHOfficersResponse,
+} from "@/types";
 
 const BASE_URL = "https://api.company-information.service.gov.uk";
 // API often returns ~25 per page regardless; we paginate until we have total_results
@@ -61,19 +67,77 @@ export function createCompaniesHouseClient(apiKey: string, officerDelayMs: numbe
     items_per_page?: number;
   }): Promise<CHAdvancedSearchResponse> {
     const { data } = await requestWithBackoff(() =>
-      client.get<CHAdvancedSearchResponse>("/advanced-search/companies", { params })
+      client.get<Record<string, unknown>>("/advanced-search/companies", { params })
     );
-    return data;
+    // API may return snake_case or camelCase; normalize to our expected shape
+    const rawItems = (data.items ?? data.Items ?? []) as Record<string, unknown>[];
+    const items: CHCompanySearchItem[] = rawItems.map((c) => ({
+      company_number: (c.company_number ?? c.companyNumber) as string,
+      company_name: (c.company_name ?? c.companyName) as string,
+      company_status: (c.company_status ?? c.companyStatus) as string,
+      company_type: (c.company_type ?? c.companyType) as string,
+      date_of_creation: (c.date_of_creation ?? c.dateOfCreation) as string | undefined,
+      sic_codes: (c.sic_codes ?? c.sicCodes) as string[] | undefined,
+      registered_office_address: (c.registered_office_address ?? c.registeredOfficeAddress) as CHAddress | undefined,
+    }));
+    const totalResults = Number(data.total_results ?? data.totalResults ?? 0);
+    const pageNumber = Number(data.page_number ?? data.pageNumber ?? 0);
+    const itemsPerPage = Number(data.items_per_page ?? data.itemsPerPage ?? 0);
+    return {
+      items,
+      total_results: totalResults,
+      page_number: pageNumber,
+      items_per_page: itemsPerPage,
+    };
   }
 
   async function getOfficers(companyNumber: string): Promise<CHOfficersResponse | null> {
     try {
-      const { data } = await requestWithBackoff(() =>
-        client.get<CHOfficersResponse>(`/company/${encodeURIComponent(companyNumber)}/officers`, {
-          params: { items_per_page: 100 },
-        })
+      // One main attempt; if we get a 429, wait briefly and retry once.
+      const fetchOnce = async () => {
+        return client.get<Record<string, unknown>>(
+          `/company/${encodeURIComponent(companyNumber)}/officers`,
+          {
+            params: { items_per_page: 100 },
+          }
+        );
+      };
+
+      let resp;
+      try {
+        resp = await fetchOnce();
+      } catch (err) {
+        const status = (err as AxiosError)?.response?.status;
+        if (status === 429) {
+          // Back off a bit, then try once more.
+          await sleep(2000);
+          resp = await fetchOnce();
+        } else {
+          throw err;
+        }
+      }
+
+      const data = resp!.data as Record<string, unknown>;
+      const rawItems = (data.items ?? data.Items ?? []) as Record<string, unknown>[];
+      const items: CHOfficerItem[] = rawItems.map((o) => {
+        const dob = (o.date_of_birth ?? o.dateOfBirth) as { month?: number; year?: number } | undefined;
+        return {
+          name: (o.name ?? "") as string,
+          officer_role: (o.officer_role ?? o.officerRole ?? "") as string,
+          appointed_on: (o.appointed_on ?? o.appointedOn) as string | undefined,
+          resigned_on: (o.resigned_on ?? o.resignedOn) as string | undefined,
+          date_of_birth: dob,
+          nationality: (o.nationality ?? "") as string | undefined,
+          occupation: (o.occupation ?? "") as string | undefined,
+          address: (o.address ?? o.registered_address ?? o.registeredAddress) as CHAddress | undefined,
+        };
+      });
+      const totalResults = Number(
+        (data as { total_results?: number; totalResults?: number }).total_results ??
+          (data as { total_results?: number; totalResults?: number }).totalResults ??
+          0
       );
-      return data;
+      return { items, total_results: totalResults };
     } catch (err) {
       console.error(`Officer fetch failed for company ${companyNumber}:`, (err as Error).message);
       return null;

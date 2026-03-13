@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -16,7 +15,7 @@ import {
 import { Search } from "lucide-react";
 import type { SearchFilters as SearchFiltersType } from "@/types";
 
-const DAY_OPTIONS = [7, 14, 30, 60] as const;
+const DAY_OPTIONS = [1, 3, 7, 14, 30, 60] as const;
 
 const COMPANY_TYPES_LIST = [
   { value: "", label: "Any" },
@@ -42,19 +41,6 @@ export function SearchFilters({
   onSearch,
   isSearching,
 }: SearchFiltersProps) {
-  const dayIndex = DAY_OPTIONS.indexOf(filters.incorporatedDays as 7 | 14 | 30 | 60) >= 0
-    ? DAY_OPTIONS.indexOf(filters.incorporatedDays as 7 | 14 | 30 | 60)
-    : 1;
-
-  const setDayIndex = (idx: number) => {
-    onFiltersChange({ ...filters, incorporatedDays: DAY_OPTIONS[Math.max(0, Math.min(idx, 3))] });
-  };
-
-  const handleSliderChange = (val: number | ReadonlyArray<number>) => {
-    const v = Array.isArray(val) ? val[0] ?? 0 : typeof val === "number" ? val : 0;
-    setDayIndex(v);
-  };
-
   return (
     <Card className="w-full">
       <CardHeader>
@@ -66,17 +52,19 @@ export function SearchFilters({
       <CardContent className="space-y-6">
         <div className="space-y-2">
           <Label>Incorporated in the last</Label>
-          <div className="flex items-center gap-3">
-            <Slider
-              value={[dayIndex]}
-              onValueChange={handleSliderChange}
-              min={0}
-              max={3}
-              step={1}
-              className="flex-1"
-            />
-            <span className="text-sm font-medium w-14">{DAY_OPTIONS[dayIndex]} days</span>
-          </div>
+          <Select
+            value={String(filters.incorporatedDays)}
+            onValueChange={(v) => onFiltersChange({ ...filters, incorporatedDays: Number(v) || 14 })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select days" />
+            </SelectTrigger>
+            <SelectContent>
+              {DAY_OPTIONS.map((d) => (
+                <SelectItem key={d} value={String(d)}>{d} days</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="space-y-2">

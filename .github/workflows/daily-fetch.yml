@@ -1,0 +1,62 @@
+# Runs daily on GitHub (laptop off OK). Same as: npm run daily-fetch
+#
+# Repo → Settings → Secrets and variables → Actions → New repository secret:
+#   COMPANIES_HOUSE_API_KEY   (required)
+#   RESEND_API_KEY            (required for email)
+#   DAILY_FETCH_EMAIL_TO      (required for email)
+# Optional:
+#   RESEND_FROM               e.g. Company Scout <onboarding@resend.dev>
+#   MAX_COMPANIES_PER_SEARCH  default 2000
+#   OFFICER_FETCH_DELAY_MS    default 700
+
+name: Daily Companies House fetch
+
+on:
+  schedule:
+    # One run per day: fetch previous day → CSV → Resend email (email goes out right after pull).
+    # 04:00 UTC ≈ morning UK; edit for your timezone (cron is always UTC on GitHub).
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Env for daily-fetch
+        env:
+          CH_KEY: ${{ secrets.COMPANIES_HOUSE_API_KEY }}
+          RESEND_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_TO: ${{ secrets.DAILY_FETCH_EMAIL_TO }}
+          RESEND_FROM_SECRET: ${{ secrets.RESEND_FROM }}
+          MAX_CO: ${{ secrets.MAX_COMPANIES_PER_SEARCH }}
+          DELAY_MS: ${{ secrets.OFFICER_FETCH_DELAY_MS }}
+        run: |
+          echo "COMPANIES_HOUSE_API_KEY=$CH_KEY" >> .env.local
+          echo "RESEND_API_KEY=$RESEND_KEY" >> .env.local
+          echo "DAILY_FETCH_EMAIL_TO=$EMAIL_TO" >> .env.local
+          if [ -n "$RESEND_FROM_SECRET" ]; then
+            echo "RESEND_FROM=$RESEND_FROM_SECRET" >> .env.local
+          else
+            echo 'RESEND_FROM=Company Scout <onboarding@resend.dev>' >> .env.local
+          fi
+          echo "MAX_COMPANIES_PER_SEARCH=${MAX_CO:-2000}" >> .env.local
+          echo "OFFICER_FETCH_DELAY_MS=${DELAY_MS:-700}" >> .env.local
+
+      - run: npm run daily-fetch
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companies-house-${{ github.run_id }}
+          path: exports/*.csv
+          if-no-files-found: warn

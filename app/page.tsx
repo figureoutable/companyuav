@@ -25,6 +25,7 @@ export default function Home() {
   const [filters, setFilters] = useState<SearchFiltersType>(DEFAULT_FILTERS);
   const [rows, setRows] = useState<CompanyDirectorRow[]>([]);
   const [totalResults, setTotalResults] = useState<number>(0);
+  const [resultMessage, setResultMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{
     phase: "companies" | "directors";
@@ -42,6 +43,7 @@ export default function Home() {
     setLoading(true);
     setProgress({ phase: "companies", current: 0, total: 1 });
     setRows([]);
+    setResultMessage(null);
     setSelectedIndices(new Set());
 
     const stopPolling = () => {
@@ -70,6 +72,7 @@ export default function Home() {
     if (result.success) {
       setRows(result.rows);
       setTotalResults(result.totalResults);
+      setResultMessage(result.message ?? null);
       toast.success(`Found ${result.rows.length} company-director row(s) from ${result.totalResults} companies.`);
     } else {
       toast.error(result.error);
@@ -118,9 +121,14 @@ export default function Home() {
             )}
 
             {!loading && rows.length > 0 && (
-              <p className="text-sm text-muted-foreground">
-                Total: {rows.length} row(s) from {totalResults} companies
-              </p>
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">
+                  Total: {rows.length} row(s) from {totalResults} companies
+                </p>
+                {resultMessage && (
+                  <p className="text-sm text-amber-600 dark:text-amber-500">{resultMessage}</p>
+                )}
+              </div>
             )}
 
             <ResultsTable

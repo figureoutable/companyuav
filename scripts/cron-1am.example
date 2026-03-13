@@ -1,0 +1,8 @@
+# Run daily at 1:00 AM — copy this line into crontab (crontab -e).
+# Replace PROJECT_ROOT with your full path, e.g. /Users/you/CompanyScout
+# Replace NPM with output of: which npm   (often /usr/local/bin/npm or /opt/homebrew/bin/npm)
+
+0 1 * * * cd PROJECT_ROOT && NPM run daily-fetch >> PROJECT_ROOT/logs/daily-fetch.log 2>&1
+
+# Example (Homebrew Node on Mac):
+# 0 1 * * * cd /Users/you/CompanyScout && /opt/homebrew/bin/npm run daily-fetch >> /Users/you/CompanyScout/logs/daily-fetch.log 2>&1

@@ -8,6 +8,10 @@ const progressStore = new Map<
   { current: number; total: number; phase: "companies" | "directors" }
 >();
 
+// Cap so the search finishes in reasonable time and we never loop forever (env: MAX_COMPANIES_PER_SEARCH)
+// Default is intentionally modest so a single search completes in a few minutes even under rate limiting.
+const DEFAULT_MAX_COMPANIES = 150;
+
 function updateProgress(
   sessionId: string,
   phase: "companies" | "directors",
@@ -40,7 +44,10 @@ export async function getSearchProgress(sessionId: string): Promise<{
 export async function searchCompaniesWithDirectors(
   filters: SearchFilters,
   sessionId: string
-): Promise<{ success: true; rows: CompanyDirectorRow[]; totalResults: number } | { success: false; error: string }> {
+): Promise<
+  | { success: true; rows: CompanyDirectorRow[]; totalResults: number; message?: string }
+  | { success: false; error: string }
+> {
   const apiKey = process.env.COMPANIES_HOUSE_API_KEY;
   if (!apiKey) {
     return { success: false, error: "COMPANIES_HOUSE_API_KEY is not set." };
@@ -49,6 +56,8 @@ export async function searchCompaniesWithDirectors(
   const delayMs = Number(process.env.OFFICER_FETCH_DELAY_MS) || 200;
   const ch = createCompaniesHouseClient(apiKey, delayMs);
   const { from, to } = getIncorporatedDateRange(filters.incorporatedDays);
+
+  const maxCompanies = Number(process.env.MAX_COMPANIES_PER_SEARCH) || DEFAULT_MAX_COMPANIES;
 
   try {
     const allRows: CompanyDirectorRow[] = [];
@@ -60,7 +69,10 @@ export async function searchCompaniesWithDirectors(
 
     // Paginate through all companies
     let companiesProcessed = 0;
+    let firstCompanyNumberOfPrevPage: string | null = null;
     while (true) {
+      if (companiesProcessed >= maxCompanies) break;
+
       const params: Record<string, string | number> = {
         incorporated_from: from,
         incorporated_to: to,
@@ -76,6 +88,11 @@ export async function searchCompaniesWithDirectors(
       totalResults = res.total_results ?? 0;
 
       if (items.length === 0) break;
+
+      // If API returns the same page again (ignores start_index), stop to avoid infinite loop
+      const firstId = items[0]?.company_number ?? "";
+      if (firstCompanyNumberOfPrevPage !== null && firstId === firstCompanyNumberOfPrevPage) break;
+      firstCompanyNumberOfPrevPage = firstId;
 
       const companyNumbers = items.map((c) => c.company_number);
       const batchTotal = companiesProcessed + companyNumbers.length;
@@ -135,11 +152,23 @@ export async function searchCompaniesWithDirectors(
       companiesProcessed += companyNumbers.length;
       startIndex += items.length;
       // Keep paginating until we have all companies (don’t stop just because this page had fewer than itemsPerPage)
-      if (items.length === 0 || startIndex >= totalResults) break;
+      const hasMoreByTotal = totalResults > 0 && startIndex >= totalResults;
+      if (hasMoreByTotal) break;
     }
 
+    // Sort newest first by incorporation date (ISO string)
+    allRows.sort((a, b) => (b.incorporation_date || '').localeCompare(a.incorporation_date || ''));
+
     progressStore.delete(sessionId);
-    return { success: true, rows: allRows, totalResults };
+    const hitCap = companiesProcessed >= maxCompanies && (totalResults === 0 || startIndex < totalResults);
+    return {
+      success: true,
+      rows: allRows,
+      totalResults: totalResults || companiesProcessed,
+      message: hitCap
+        ? `Limited to first ${maxCompanies} companies. Set MAX_COMPANIES_PER_SEARCH in .env.local for more.`
+        : undefined,
+    };
   } catch (err: unknown) {
     progressStore.delete(sessionId);
     const message = err instanceof Error ? err.message : "Companies House API request failed.";
