@@ -1,12 +1,13 @@
 /**
- * Daily job: fetch ~2k companies incorporated the previous day, build CSV,
+ * Daily job: fetch all companies incorporated the previous day, build CSV,
  * save to exports/, optionally upload to Google Drive, optionally email CSV.
+ * Gets every record from that day (more than 2k → all; less → all).
  *
  * Run: npm run daily-fetch
  * Cron (1am daily): 0 1 * * * cd /path/to/CompanyScout && npm run daily-fetch >> logs/daily-fetch.log 2>&1
  *
  * Requires: .env.local with COMPANIES_HOUSE_API_KEY
- * Optional: Google Drive + SMTP (see README)
+ * Optional: MAX_COMPANIES_PER_DAY (cap; omit for no cap). Google Drive + SMTP (see README)
  */
 
 import { config } from "dotenv";
@@ -20,7 +21,8 @@ import type { CompanyDirectorRow } from "../types";
 // Load .env.local from project root
 config({ path: resolve(process.cwd(), ".env.local") });
 
-const MAX_COMPANIES = Number(process.env.MAX_COMPANIES_PER_SEARCH) || 2000;
+/** 0 = no cap (fetch entire previous day). Set to e.g. 5000 to limit (e.g. for job timeout). */
+const CAP = Number(process.env.MAX_COMPANIES_PER_DAY) || 0;
 const OFFICER_DELAY_MS = Number(process.env.OFFICER_FETCH_DELAY_MS) || 700;
 
 function getYesterdayDateRange(): { from: string; to: string } {
@@ -48,10 +50,12 @@ async function fetchPreviousDayRows(): Promise<CompanyDirectorRow[]> {
   let companiesProcessed = 0;
   let firstCompanyNumberOfPrevPage: string | null = null;
 
-  console.log(`[daily-fetch] Fetching companies incorporated between ${from} and ${to} (max ${MAX_COMPANIES} companies)...`);
+  console.log(
+    `[daily-fetch] Fetching all companies incorporated between ${from} and ${to}${CAP > 0 ? ` (cap ${CAP})` : " (no cap)"}...`
+  );
 
   while (true) {
-    if (companiesProcessed >= MAX_COMPANIES) break;
+    if (CAP > 0 && companiesProcessed >= CAP) break;
 
     let res;
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -85,7 +89,7 @@ async function fetchPreviousDayRows(): Promise<CompanyDirectorRow[]> {
     firstCompanyNumberOfPrevPage = firstId;
 
     for (let i = 0; i < items.length; i++) {
-      if (companiesProcessed >= MAX_COMPANIES) break;
+      if (CAP > 0 && companiesProcessed >= CAP) break;
       const company = items[i];
       const officersRes = await ch.getOfficers(company.company_number);
       await ch.sleep(OFFICER_DELAY_MS);

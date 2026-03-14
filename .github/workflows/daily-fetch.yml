@@ -6,7 +6,7 @@
 #   DAILY_FETCH_EMAIL_TO      (required for email)
 # Optional:
 #   RESEND_FROM               e.g. Company Scout <onboarding@resend.dev>
-#   MAX_COMPANIES_PER_SEARCH  default 2000
+#   MAX_COMPANIES_PER_DAY     cap (omit to fetch entire previous day)
 #   OFFICER_FETCH_DELAY_MS    default 700
 
 name: Daily Companies House fetch
@@ -47,7 +47,7 @@ jobs:
           RESEND_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_TO: ${{ secrets.DAILY_FETCH_EMAIL_TO }}
           RESEND_FROM_SECRET: ${{ secrets.RESEND_FROM }}
-          MAX_CO: ${{ secrets.MAX_COMPANIES_PER_SEARCH }}
+          MAX_PER_DAY: ${{ secrets.MAX_COMPANIES_PER_DAY }}
           DELAY_MS: ${{ secrets.OFFICER_FETCH_DELAY_MS }}
         run: |
           echo "COMPANIES_HOUSE_API_KEY=$CH_KEY" >> .env.local
@@ -58,7 +58,7 @@ jobs:
           else
             echo 'RESEND_FROM=Company Scout <onboarding@resend.dev>' >> .env.local
           fi
-          echo "MAX_COMPANIES_PER_SEARCH=${MAX_CO:-2000}" >> .env.local
+          if [ -n "$MAX_PER_DAY" ]; then echo "MAX_COMPANIES_PER_DAY=$MAX_PER_DAY" >> .env.local; fi
           echo "OFFICER_FETCH_DELAY_MS=${DELAY_MS:-700}" >> .env.local
 
       - name: Daily fetch (Companies House → CSV)

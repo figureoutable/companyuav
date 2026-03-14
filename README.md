@@ -83,7 +83,7 @@ npm run daily-fetch
 
 Requires `.env.local` with `COMPANIES_HOUSE_API_KEY`. Optional:
 
-- `MAX_COMPANIES_PER_SEARCH=2000` — cap per run (default 2000)
+- `MAX_COMPANIES_PER_DAY` — optional cap (omit to fetch **all** companies from the previous day)
 - `OFFICER_FETCH_DELAY_MS=700` — delay between officer calls (stay under 600 req/5 min)
 
 Output: `exports/companies_house_YYYY-MM-DD.csv` (date = yesterday).
@@ -136,7 +136,7 @@ npm run schedule-1am
 
 That installs cron: **every day at 1:00 AM** (your Mac’s local time) it runs `scripts/run-daily-fetch.sh`, which:
 
-1. Pulls up to **2000** companies incorporated **the previous calendar day** (`MAX_COMPANIES_PER_SEARCH=2000` in `.env.local`).
+1. Pulls **all** companies incorporated **the previous calendar day** (no cap by default; set `MAX_COMPANIES_PER_DAY` to cap).
 2. Saves `exports/companies_house_YYYY-MM-DD.csv`.
 3. **Emails the CSV** via Resend if `RESEND_API_KEY` + `DAILY_FETCH_EMAIL_TO` are set.
 
