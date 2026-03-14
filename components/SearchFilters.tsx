@@ -15,7 +15,14 @@ import {
 import { Search } from "lucide-react";
 import type { SearchFilters as SearchFiltersType } from "@/types";
 
-const DAY_OPTIONS = [1, 3, 7, 14, 30, 60] as const;
+const MIN_N = 1;
+const MAX_N = 2000;
+
+function clampN(n: number): number {
+  if (Number.isNaN(n) || n < MIN_N) return 50;
+  if (n > MAX_N) return MAX_N;
+  return Math.floor(n);
+}
 
 const COMPANY_TYPES_LIST = [
   { value: "", label: "Any" },
@@ -31,7 +38,7 @@ const COMPANY_TYPES_LIST = [
 export interface SearchFiltersProps {
   filters: SearchFiltersType;
   onFiltersChange: (f: SearchFiltersType) => void;
-  onSearch: () => void;
+  onSearch: (filters: SearchFiltersType) => void;
   isSearching: boolean;
 }
 
@@ -41,6 +48,18 @@ export function SearchFilters({
   onSearch,
   isSearching,
 }: SearchFiltersProps) {
+  const [countInput, setCountInput] = React.useState(String(filters.recentResultCount));
+  React.useEffect(() => {
+    setCountInput(String(filters.recentResultCount));
+  }, [filters.recentResultCount]);
+
+  const commitCount = () => {
+    const n = parseInt(countInput, 10);
+    const clamped = clampN(Number.isNaN(n) ? 50 : n);
+    setCountInput(String(clamped));
+    onFiltersChange({ ...filters, recentResultCount: clamped });
+  };
+
   return (
     <Card className="w-full">
       <CardHeader>
@@ -51,20 +70,32 @@ export function SearchFilters({
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-2">
-          <Label>Incorporated in the last</Label>
-          <Select
-            value={String(filters.incorporatedDays)}
-            onValueChange={(v) => onFiltersChange({ ...filters, incorporatedDays: Number(v) || 14 })}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select days" />
-            </SelectTrigger>
-            <SelectContent>
-              {DAY_OPTIONS.map((d) => (
-                <SelectItem key={d} value={String(d)}>{d} days</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label htmlFor="recent-count">Most recent results</Label>
+          <p className="text-xs text-muted-foreground">
+            Newest incorporations first — up to {MIN_N}–{MAX_N} companies (then directors). Scans
+            backwards day by day (max ~3 years). Large runs take a long time — use{" "}
+            <code className="rounded bg-muted px-1">npm run extract-2000</code> for a CSV in the background.
+          </p>
+          <div className="flex items-center gap-2">
+            <Input
+              id="recent-count"
+              type="number"
+              inputMode="numeric"
+              min={MIN_N}
+              max={MAX_N}
+              className="max-w-[8rem]"
+              value={countInput}
+              onChange={(e) => setCountInput(e.target.value)}
+              onBlur={commitCount}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  (e.target as HTMLInputElement).blur();
+                  commitCount();
+                }
+              }}
+            />
+            <span className="text-sm text-muted-foreground shrink-0">companies</span>
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -111,7 +142,14 @@ export function SearchFilters({
 
         <Button
           className="w-full"
-          onClick={onSearch}
+          onClick={() => {
+            const n = parseInt(countInput, 10);
+            const clamped = clampN(Number.isNaN(n) ? 50 : n);
+            setCountInput(String(clamped));
+            const next = { ...filters, recentResultCount: clamped };
+            onFiltersChange(next);
+            onSearch(next);
+          }}
           disabled={isSearching}
         >
           {isSearching ? "Searching…" : "Search"}

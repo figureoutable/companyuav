@@ -4,7 +4,7 @@ A Next.js web application that queries the **Companies House public API** to fin
 
 ## Features
 
-- **Search** by incorporation date range (last 1 / 3 / 7 / 14 / 30 / 60 days), SIC codes, company type, and registered address keyword
+- **Search** by **how many** most recently incorporated companies you want (newest first), plus SIC codes, company type, and registered address keyword
 - **Results table** with company details and director names, occupations, nationalities
 - **Export** selected rows or all results to CSV (`companies_house_YYYY-MM-DD.csv`)
 - **Rate limiting**: configurable delay between officer lookups, exponential backoff on 429, live progress (“Fetching directors: X of Y companies”)

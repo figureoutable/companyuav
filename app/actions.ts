@@ -1,16 +1,18 @@
 "use server";
 
 import { createCompaniesHouseClient } from "@/lib/companiesHouse";
-import type { CompanyDirectorRow, SearchFilters } from "@/types";
+import type { CHCompanySearchItem, CompanyDirectorRow, SearchFilters } from "@/types";
 
 const progressStore = new Map<
   string,
   { current: number; total: number; phase: "companies" | "directors" }
 >();
 
-// Cap so the search finishes in reasonable time and we never loop forever (env: MAX_COMPANIES_PER_SEARCH)
-// Default is intentionally modest so a single search completes in a few minutes even under rate limiting.
-const DEFAULT_MAX_COMPANIES = 150;
+const DEFAULT_RECENT_COUNT = 50;
+const MIN_RECENT = 1;
+const MAX_RECENT = 2000;
+/** Stop scanning backwards after this many days (sparse filters may yield fewer than N). */
+const MAX_DAY_SCAN = 1095;
 
 function updateProgress(
   sessionId: string,
@@ -21,14 +23,10 @@ function updateProgress(
   progressStore.set(sessionId, { phase, current, total });
 }
 
-function getIncorporatedDateRange(days: number): { from: string; to: string } {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(from.getDate() - days);
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
-  };
+function clampRecentCount(n: number): number {
+  const x = Math.floor(Number(n));
+  if (Number.isNaN(x) || x < MIN_RECENT) return DEFAULT_RECENT_COUNT;
+  return Math.min(MAX_RECENT, x);
 }
 
 export async function getSearchProgress(sessionId: string): Promise<{
@@ -41,6 +39,10 @@ export async function getSearchProgress(sessionId: string): Promise<{
   return { current: p.current, total: p.total, phase: p.phase };
 }
 
+/**
+ * Walk backwards day-by-day from today so the first N companies are the N most recent
+ * incorporations matching filters (newest incorporation date first).
+ */
 export async function searchCompaniesWithDirectors(
   filters: SearchFilters,
   sessionId: string
@@ -55,119 +57,127 @@ export async function searchCompaniesWithDirectors(
 
   const delayMs = Number(process.env.OFFICER_FETCH_DELAY_MS) || 200;
   const ch = createCompaniesHouseClient(apiKey, delayMs);
-  const { from, to } = getIncorporatedDateRange(filters.incorporatedDays);
-
-  const maxCompanies = Number(process.env.MAX_COMPANIES_PER_SEARCH) || DEFAULT_MAX_COMPANIES;
+  const wantN = clampRecentCount(filters.recentResultCount);
+  const itemsPerPage = ch.ITEMS_PER_PAGE;
 
   try {
+    updateProgress(sessionId, "companies", 0, MAX_DAY_SCAN);
+
+    const collected: CHCompanySearchItem[] = [];
+    const seen = new Set<string>();
+    const day = new Date();
+    day.setHours(0, 0, 0, 0);
+
+    for (let dayIndex = 0; dayIndex < MAX_DAY_SCAN && collected.length < wantN; dayIndex++) {
+      const ymd = day.toISOString().slice(0, 10);
+      updateProgress(sessionId, "companies", dayIndex + 1, MAX_DAY_SCAN);
+
+      let startIndex = 0;
+      let firstCompanyNumberOfPrevPage: string | null = null;
+
+      while (collected.length < wantN) {
+        const params: Record<string, string | number> = {
+          incorporated_from: ymd,
+          incorporated_to: ymd,
+          start_index: startIndex,
+          items_per_page: itemsPerPage,
+        };
+        if (filters.sicCodes.length) params.sic_codes = filters.sicCodes.join(",");
+        if (filters.companyType) params.company_type = filters.companyType;
+        if (filters.addressKeyword.trim()) params.location = filters.addressKeyword.trim();
+
+        const res = await ch.advancedSearch(params as Parameters<typeof ch.advancedSearch>[0]);
+        const items = res.items ?? [];
+
+        if (items.length === 0) break;
+
+        const firstId = items[0]?.company_number ?? "";
+        if (firstCompanyNumberOfPrevPage !== null && firstId === firstCompanyNumberOfPrevPage) break;
+        firstCompanyNumberOfPrevPage = firstId;
+
+        for (const c of items) {
+          if (seen.has(c.company_number)) continue;
+          seen.add(c.company_number);
+          collected.push(c);
+          if (collected.length >= wantN) break;
+        }
+
+        startIndex += items.length;
+        const totalOnDay = res.total_results ?? 0;
+        if (totalOnDay > 0 && startIndex >= totalOnDay) break;
+      }
+
+      day.setDate(day.getDate() - 1);
+    }
+
+    const topCompanies = collected.slice(0, wantN);
+    const message =
+      collected.length < wantN
+        ? `Only ${collected.length} companies matched in the last ${MAX_DAY_SCAN} days (you asked for ${wantN}). Try loosening SIC, location, or type.`
+        : undefined;
+
     const allRows: CompanyDirectorRow[] = [];
-    let totalResults = 0;
-    let startIndex = 0;
-    const itemsPerPage = ch.ITEMS_PER_PAGE;
+    updateProgress(sessionId, "directors", 0, topCompanies.length);
 
-    updateProgress(sessionId, "companies", 0, 1);
+    for (let i = 0; i < topCompanies.length; i++) {
+      const company = topCompanies[i];
+      updateProgress(sessionId, "directors", i + 1, topCompanies.length);
+      const officersRes = await ch.getOfficers(company.company_number);
+      await ch.sleep(delayMs);
 
-    // Paginate through all companies
-    let companiesProcessed = 0;
-    let firstCompanyNumberOfPrevPage: string | null = null;
-    while (true) {
-      if (companiesProcessed >= maxCompanies) break;
+      const directors = (officersRes?.items ?? []).filter(
+        (o) => o.officer_role?.toLowerCase() === "director"
+      );
 
-      const params: Record<string, string | number> = {
-        incorporated_from: from,
-        incorporated_to: to,
-        start_index: startIndex,
-        items_per_page: itemsPerPage,
-      };
-      if (filters.sicCodes.length) params.sic_codes = filters.sicCodes.join(",");
-      if (filters.companyType) params.company_type = filters.companyType;
-      if (filters.addressKeyword.trim()) params.location = filters.addressKeyword.trim();
+      const regAddress = ch.formatAddress(company.registered_office_address);
+      const sicStr = (company.sic_codes ?? []).join("; ");
+      const incorporationDate = company.date_of_creation ?? "";
 
-      const res = await ch.advancedSearch(params as Parameters<typeof ch.advancedSearch>[0]);
-      const items = res.items ?? [];
-      totalResults = res.total_results ?? 0;
-
-      if (items.length === 0) break;
-
-      // If API returns the same page again (ignores start_index), stop to avoid infinite loop
-      const firstId = items[0]?.company_number ?? "";
-      if (firstCompanyNumberOfPrevPage !== null && firstId === firstCompanyNumberOfPrevPage) break;
-      firstCompanyNumberOfPrevPage = firstId;
-
-      const companyNumbers = items.map((c) => c.company_number);
-      const batchTotal = companiesProcessed + companyNumbers.length;
-      updateProgress(sessionId, "directors", companiesProcessed, Math.max(totalResults, batchTotal));
-
-      for (let i = 0; i < companyNumbers.length; i++) {
-        updateProgress(sessionId, "directors", companiesProcessed + i + 1, Math.max(totalResults, batchTotal));
-        const company = items[i];
-        const officersRes = await ch.getOfficers(companyNumbers[i]);
-        await ch.sleep(delayMs);
-
-        const directors = (officersRes?.items ?? []).filter(
-          (o) => o.officer_role?.toLowerCase() === "director"
-        );
-
-        const regAddress = ch.formatAddress(company.registered_office_address);
-        const sicStr = (company.sic_codes ?? []).join("; ");
-        const incorporationDate = company.date_of_creation ?? "";
-
-        if (directors.length === 0) {
+      if (directors.length === 0) {
+        allRows.push({
+          company_number: company.company_number,
+          company_name: company.company_name ?? "",
+          incorporation_date: incorporationDate,
+          sic_codes: sicStr,
+          registered_address: regAddress,
+          director_name: "",
+          director_dob_month_year: "",
+          director_nationality: "",
+          director_occupation: "",
+          director_address: "",
+          company_house_url: `https://find-and-update.company-information.service.gov.uk/company/${company.company_number}`,
+        });
+      } else {
+        for (const d of directors) {
+          const dob =
+            d.date_of_birth?.month && d.date_of_birth?.year
+              ? `${d.date_of_birth.month}/${d.date_of_birth.year}`
+              : "";
           allRows.push({
             company_number: company.company_number,
             company_name: company.company_name ?? "",
             incorporation_date: incorporationDate,
             sic_codes: sicStr,
             registered_address: regAddress,
-            director_name: "",
-            director_dob_month_year: "",
-            director_nationality: "",
-            director_occupation: "",
-            director_address: "",
+            director_name: d.name ?? "",
+            director_dob_month_year: dob,
+            director_nationality: d.nationality ?? "",
+            director_occupation: d.occupation ?? "",
+            director_address: ch.formatAddress(d.address),
             company_house_url: `https://find-and-update.company-information.service.gov.uk/company/${company.company_number}`,
           });
-        } else {
-          for (const d of directors) {
-            const dob =
-              d.date_of_birth?.month && d.date_of_birth?.year
-                ? `${d.date_of_birth.month}/${d.date_of_birth.year}`
-                : "";
-            allRows.push({
-              company_number: company.company_number,
-              company_name: company.company_name ?? "",
-              incorporation_date: incorporationDate,
-              sic_codes: sicStr,
-              registered_address: regAddress,
-              director_name: d.name ?? "",
-              director_dob_month_year: dob,
-              director_nationality: d.nationality ?? "",
-              director_occupation: d.occupation ?? "",
-              director_address: ch.formatAddress(d.address),
-              company_house_url: `https://find-and-update.company-information.service.gov.uk/company/${company.company_number}`,
-            });
-          }
         }
       }
-
-      companiesProcessed += companyNumbers.length;
-      startIndex += items.length;
-      // Keep paginating until we have all companies (don’t stop just because this page had fewer than itemsPerPage)
-      const hasMoreByTotal = totalResults > 0 && startIndex >= totalResults;
-      if (hasMoreByTotal) break;
     }
 
-    // Sort newest first by incorporation date (ISO string)
-    allRows.sort((a, b) => (b.incorporation_date || '').localeCompare(a.incorporation_date || ''));
+    allRows.sort((a, b) => (b.incorporation_date || "").localeCompare(a.incorporation_date || ""));
 
     progressStore.delete(sessionId);
-    const hitCap = companiesProcessed >= maxCompanies && (totalResults === 0 || startIndex < totalResults);
     return {
       success: true,
       rows: allRows,
-      totalResults: totalResults || companiesProcessed,
-      message: hitCap
-        ? `Limited to first ${maxCompanies} companies. Set MAX_COMPANIES_PER_SEARCH in .env.local for more.`
-        : undefined,
+      totalResults: topCompanies.length,
+      message,
     };
   } catch (err: unknown) {
     progressStore.delete(sessionId);

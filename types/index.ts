@@ -62,7 +62,8 @@ export interface CompanyDirectorRow {
 
 // Search filters (form state)
 export interface SearchFilters {
-  incorporatedDays: number;
+  /** How many most recently incorporated companies to load (then officers). */
+  recentResultCount: number;
   sicCodes: string[];
   companyType: string;
   addressKeyword: string;

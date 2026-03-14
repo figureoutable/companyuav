@@ -9,6 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "daily-fetch": "tsx scripts/daily-fetch-to-drive.ts",
+    "extract-recent": "tsx scripts/extract-recent-n.ts",
+    "extract-2000": "EXTRACT_COUNT=2000 tsx scripts/extract-recent-n.ts",
     "test-email": "tsx scripts/test-resend-email.ts",
     "schedule-1am": "bash scripts/install-cron-1am.sh"
   },

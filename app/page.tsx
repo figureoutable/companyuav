@@ -13,7 +13,7 @@ import { searchCompaniesWithDirectors, getSearchProgress } from "./actions";
 import type { SearchFilters as SearchFiltersType, CompanyDirectorRow } from "@/types";
 
 const DEFAULT_FILTERS: SearchFiltersType = {
-  incorporatedDays: 14,
+  recentResultCount: 50,
   sicCodes: [],
   companyType: "",
   addressKeyword: "",
@@ -37,7 +37,8 @@ export default function Home() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { theme, setTheme } = useTheme();
 
-  const runSearch = useCallback(async () => {
+  const runSearch = useCallback(async (filtersOverride?: SearchFiltersType) => {
+    const toSearch = filtersOverride ?? filters;
     const sessionId = `search-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     sessionIdRef.current = sessionId;
     setLoading(true);
@@ -65,7 +66,7 @@ export default function Home() {
       }
     }, POLL_INTERVAL_MS);
 
-    const result = await searchCompaniesWithDirectors(filters, sessionId);
+    const result = await searchCompaniesWithDirectors(toSearch, sessionId);
     stopPolling();
     setLoading(false);
 

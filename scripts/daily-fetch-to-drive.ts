@@ -53,12 +53,28 @@ async function fetchPreviousDayRows(): Promise<CompanyDirectorRow[]> {
   while (true) {
     if (companiesProcessed >= MAX_COMPANIES) break;
 
-    const res = await ch.advancedSearch({
-      incorporated_from: from,
-      incorporated_to: to,
-      start_index: startIndex,
-      items_per_page: ch.ITEMS_PER_PAGE,
-    });
+    let res;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        res = await ch.advancedSearch({
+          incorporated_from: from,
+          incorporated_to: to,
+          start_index: startIndex,
+          items_per_page: Math.min(ch.ITEMS_PER_PAGE, 50),
+        });
+        break;
+      } catch (e: unknown) {
+        const status = (e as { response?: { status?: number } })?.response?.status;
+        if ((status === 500 || status === 502) && attempt < 3) {
+          const wait = 5000 * (attempt + 1);
+          console.warn(`[daily-fetch] API ${status} at start_index=${startIndex}, retry in ${wait}ms…`);
+          await new Promise((r) => setTimeout(r, wait));
+        } else {
+          throw e;
+        }
+      }
+    }
+    if (!res) break;
     const items = res.items ?? [];
     totalResults = res.total_results ?? 0;
 

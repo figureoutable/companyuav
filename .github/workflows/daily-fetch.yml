@@ -1,7 +1,7 @@
 # Runs daily on GitHub (laptop off OK). Same as: npm run daily-fetch
 #
 # Repo → Settings → Secrets and variables → Actions → New repository secret:
-#   COMPANIES_HOUSE_API_KEY   (required)
+#   COMPANIES_HOUSE_API_KEY   (required — fetch will fail without it)
 #   RESEND_API_KEY            (required for email)
 #   DAILY_FETCH_EMAIL_TO      (required for email)
 # Optional:
@@ -14,8 +14,8 @@ name: Daily Companies House fetch
 on:
   schedule:
     # One run per day: fetch previous day → CSV → Resend email (email goes out right after pull).
-    # 04:00 UTC ≈ morning UK; edit for your timezone (cron is always UTC on GitHub).
-    - cron: "0 4 * * *"
+    # 01:00 UTC (cron is always UTC on GitHub).
+    - cron: "0 1 * * *"
   workflow_dispatch:
 
 jobs:
@@ -28,10 +28,18 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
 
       - run: npm ci
+
+      - name: Check required secrets
+        run: |
+          if [ -z "${{ secrets.COMPANIES_HOUSE_API_KEY }}" ]; then
+            echo "::error::COMPANIES_HOUSE_API_KEY is not set. Add it in repo Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "Required secrets present."
 
       - name: Env for daily-fetch
         env:
@@ -53,7 +61,8 @@ jobs:
           echo "MAX_COMPANIES_PER_SEARCH=${MAX_CO:-2000}" >> .env.local
           echo "OFFICER_FETCH_DELAY_MS=${DELAY_MS:-700}" >> .env.local
 
-      - run: npm run daily-fetch
+      - name: Daily fetch (Companies House → CSV)
+        run: npm run daily-fetch
 
       - uses: actions/upload-artifact@v4
         with:
