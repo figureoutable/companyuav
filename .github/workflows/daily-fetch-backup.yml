@@ -47,6 +47,7 @@ jobs:
           # Backup run: smaller cap & slower officers to reduce risk and runtime.
           echo "MAX_COMPANIES_PER_DAY=3000" >> .env.local
           echo "OFFICER_FETCH_DELAY_MS=1000" >> .env.local
+          echo "DAILY_FETCH_LABEL=4am" >> .env.local
 
       - name: Daily fetch backup (Companies House → CSV)
         run: npm run daily-fetch

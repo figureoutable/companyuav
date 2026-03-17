@@ -186,8 +186,9 @@ async function uploadToGoogleDrive(csvContent: string, filename: string): Promis
 async function emailCsv(csvContent: string, filename: string, rowCount: number): Promise<void> {
   const to = process.env.DAILY_FETCH_EMAIL_TO?.trim();
   const { from: day } = getYesterdayDateRange();
-  const subject = `Companies House export — ${day} (${rowCount} rows)`;
-  const textBody = `Attached: UK companies incorporated on ${day} (director rows).\nFile: ${filename}`;
+  const label = (process.env.DAILY_FETCH_LABEL ?? "1am").trim();
+  const subject = `Companies House export — ${label} ${day} (${rowCount} rows)`;
+  const textBody = `Attached: UK companies incorporated on ${day} (director rows). Run: ${label}.\nFile: ${filename}`;
   const toList = to?.split(",").map((e) => e.trim()).filter(Boolean) ?? [];
 
   // --- Resend (easiest: API key only) ---
@@ -260,7 +261,9 @@ async function emailCsv(csvContent: string, filename: string, rowCount: number):
 async function main() {
   const rows = await fetchPreviousDayRows();
   const { from } = getYesterdayDateRange();
-  const filename = `companies_house_${from}.csv`;
+  const rawLabel = (process.env.DAILY_FETCH_LABEL ?? "1am").trim();
+  const safeLabel = rawLabel.replace(/\s+/g, "_");
+  const filename = `companies_house_${safeLabel}_${from}.csv`;
   const csvContent = buildCsvContent(rows);
 
   await mkdir(resolve(process.cwd(), "exports"), { recursive: true });

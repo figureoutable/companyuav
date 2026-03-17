@@ -60,6 +60,7 @@ jobs:
           fi
           if [ -n "$MAX_PER_DAY" ]; then echo "MAX_COMPANIES_PER_DAY=$MAX_PER_DAY" >> .env.local; fi
           echo "OFFICER_FETCH_DELAY_MS=${DELAY_MS:-700}" >> .env.local
+          echo "DAILY_FETCH_LABEL=1am" >> .env.local
 
       - name: Daily fetch (Companies House → CSV)
         run: npm run daily-fetch
