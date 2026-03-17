@@ -67,6 +67,7 @@ export async function searchCompaniesWithDirectors(
     const seen = new Set<string>();
     const day = new Date();
     day.setHours(0, 0, 0, 0);
+    let hadPageErrors = false;
 
     for (let dayIndex = 0; dayIndex < MAX_DAY_SCAN && collected.length < wantN; dayIndex++) {
       const ymd = day.toISOString().slice(0, 10);
@@ -86,7 +87,31 @@ export async function searchCompaniesWithDirectors(
         if (filters.companyType) params.company_type = filters.companyType;
         if (filters.addressKeyword.trim()) params.location = filters.addressKeyword.trim();
 
-        const res = await ch.advancedSearch(params as Parameters<typeof ch.advancedSearch>[0]);
+        let res: Awaited<ReturnType<typeof ch.advancedSearch>> | null = null;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            res = await ch.advancedSearch(params as Parameters<typeof ch.advancedSearch>[0]);
+            break;
+          } catch (e: unknown) {
+            const status = (e as { response?: { status?: number } })?.response?.status;
+            if ((status === 500 || status === 502) && attempt < 3) {
+              const wait = 3000 * (attempt + 1);
+              console.warn(
+                `[searchCompaniesWithDirectors] Companies House API ${status} for ${ymd} start_index=${startIndex}, retry in ${wait}ms…`
+              );
+              await ch.sleep(wait);
+            } else {
+              hadPageErrors = true;
+              const label = status ?? "unknown";
+              console.warn(
+                `[searchCompaniesWithDirectors] Giving up on page for ${ymd} at start_index=${startIndex} (status ${label}). Continuing with companies fetched so far.`
+              );
+              res = { items: [], total_results: 0, page_number: 0, items_per_page: 0 };
+              break;
+            }
+          }
+        }
+        if (!res) break;
         const items = res.items ?? [];
 
         if (items.length === 0) break;
@@ -111,10 +136,15 @@ export async function searchCompaniesWithDirectors(
     }
 
     const topCompanies = collected.slice(0, wantN);
-    const message =
-      collected.length < wantN
-        ? `Only ${collected.length} companies matched in the last ${MAX_DAY_SCAN} days (you asked for ${wantN}). Try loosening SIC, location, or type.`
-        : undefined;
+    let message: string | undefined;
+    if (collected.length < wantN) {
+      message = `Only ${collected.length} companies matched in the last ${MAX_DAY_SCAN} days (you asked for ${wantN}). Try loosening SIC, location, or type.`;
+    }
+    if (hadPageErrors) {
+      const extra =
+        " Companies House had internal errors on part of this search. Results may be incomplete for some days.";
+      message = message ? message + extra : extra.trim();
+    }
 
     const allRows: CompanyDirectorRow[] = [];
     updateProgress(sessionId, "directors", 0, topCompanies.length);
