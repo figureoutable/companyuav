@@ -1,0 +1,59 @@
+name: Daily Companies House fetch (backup 4am)
+
+on:
+  schedule:
+    # Backup run: smaller volume, slower, at 04:00 UTC.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Check required secrets
+        run: |
+          if [ -z "${{ secrets.COMPANIES_HOUSE_API_KEY }}" ]; then
+            echo "::error::COMPANIES_HOUSE_API_KEY is not set. Add it in repo Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "Required secrets present."
+
+      - name: Env for daily-fetch backup
+        env:
+          CH_KEY: ${{ secrets.COMPANIES_HOUSE_API_KEY }}
+          RESEND_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_TO: ${{ secrets.DAILY_FETCH_EMAIL_TO }}
+          RESEND_FROM_SECRET: ${{ secrets.RESEND_FROM }}
+        run: |
+          echo "COMPANIES_HOUSE_API_KEY=$CH_KEY" >> .env.local
+          echo "RESEND_API_KEY=$RESEND_KEY" >> .env.local
+          echo "DAILY_FETCH_EMAIL_TO=$EMAIL_TO" >> .env.local
+          if [ -n "$RESEND_FROM_SECRET" ]; then
+            echo "RESEND_FROM=$RESEND_FROM_SECRET" >> .env.local
+          else
+            echo 'RESEND_FROM=Company Scout <onboarding@resend.dev>' >> .env.local
+          fi
+          # Backup run: smaller cap & slower officers to reduce risk and runtime.
+          echo "MAX_COMPANIES_PER_DAY=3000" >> .env.local
+          echo "OFFICER_FETCH_DELAY_MS=1000" >> .env.local
+
+      - name: Daily fetch backup (Companies House → CSV)
+        run: npm run daily-fetch
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companies-house-backup-${{ github.run_id }}
+          path: exports/*.csv
+          if-no-files-found: warn
+
